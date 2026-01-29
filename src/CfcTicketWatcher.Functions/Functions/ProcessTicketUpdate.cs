@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Azure.Data.Tables;
 using CfcTicketWatcher.Functions.Services;
 using CfcTicketWatcher.Models;
@@ -17,8 +16,9 @@ public class ProcessTicketUpdate
 {
     private readonly ITicketParserService _ticketParserService;
     private readonly ILogger<ProcessTicketUpdate> _logger;
-    private readonly TableClient _upcomingMatchesTable;
-    private readonly TableClient _sentNotificationsTable;
+    private readonly string _storageConnectionString;
+    private TableClient? _upcomingMatchesTable;
+    private TableClient? _sentNotificationsTable;
 
     public ProcessTicketUpdate(
         ITicketParserService ticketParserService,
@@ -27,15 +27,22 @@ public class ProcessTicketUpdate
     {
         _ticketParserService = ticketParserService;
         _logger = logger;
+        _storageConnectionString = configuration["AzureWebJobsStorage"] ?? "UseDevelopmentStorage=true";
+    }
 
-        var storageConnectionString = configuration["AzureWebJobsStorage"] ?? "UseDevelopmentStorage=true";
-        var tableServiceClient = new TableServiceClient(storageConnectionString);
-        
-        _upcomingMatchesTable = tableServiceClient.GetTableClient("UpcomingMatches");
-        _upcomingMatchesTable.CreateIfNotExists();
-        
-        _sentNotificationsTable = tableServiceClient.GetTableClient("SentNotifications");
-        _sentNotificationsTable.CreateIfNotExists();
+    private async Task<(TableClient upcomingMatches, TableClient sentNotifications)> GetTableClientsAsync()
+    {
+        if (_upcomingMatchesTable == null || _sentNotificationsTable == null)
+        {
+            var tableServiceClient = new TableServiceClient(_storageConnectionString);
+            
+            _upcomingMatchesTable = tableServiceClient.GetTableClient("UpcomingMatches");
+            await _upcomingMatchesTable.CreateIfNotExistsAsync();
+            
+            _sentNotificationsTable = tableServiceClient.GetTableClient("SentNotifications");
+            await _sentNotificationsTable.CreateIfNotExistsAsync();
+        }
+        return (_upcomingMatchesTable, _sentNotificationsTable);
     }
 
     /// <summary>
@@ -54,24 +61,23 @@ public class ProcessTicketUpdate
 
         try
         {
+            var (upcomingMatchesTable, sentNotificationsTable) = await GetTableClientsAsync();
             var matches = _ticketParserService.ParseUpcomingMatches(blobContent);
 
             _logger.LogInformation("Parsed {Count} matches from blob", matches.Count);
 
             foreach (var match in matches)
             {
-                // Check if this match already exists in table storage
-                var existingMatch = await GetExistingMatchAsync(match.PartitionKey, match.RowKey);
+                // Try to add the match as a new entity
+                var isNewMatch = await TryAddNewMatchAsync(upcomingMatchesTable, match);
 
-                if (existingMatch == null)
+                if (isNewMatch)
                 {
-                    // New match - add to table and check if notification needed
+                    // New match - check if notification was already queued (by another trigger)
                     _logger.LogInformation("New match detected: {MatchLabel}", match.MatchLabel);
                     
-                    await _upcomingMatchesTable.UpsertEntityAsync(match);
-
                     // Check if we've already sent a notification for this match
-                    var notificationSent = await IsNotificationSentAsync(match.RowKey);
+                    var notificationSent = await IsNotificationSentAsync(sentNotificationsTable, match.RowKey);
                     
                     if (!notificationSent)
                     {
@@ -87,9 +93,13 @@ public class ProcessTicketUpdate
                 }
                 else
                 {
-                    // Update existing match
-                    match.ETag = existingMatch.ETag;
-                    await _upcomingMatchesTable.UpsertEntityAsync(match);
+                    // Existing match - update with latest info
+                    var existingMatch = await GetExistingMatchAsync(upcomingMatchesTable, match.PartitionKey, match.RowKey);
+                    if (existingMatch != null)
+                    {
+                        match.ETag = existingMatch.ETag;
+                        await upcomingMatchesTable.UpsertEntityAsync(match);
+                    }
                 }
             }
 
@@ -107,11 +117,27 @@ public class ProcessTicketUpdate
         }
     }
 
-    private async Task<UpcomingMatch?> GetExistingMatchAsync(string partitionKey, string rowKey)
+    /// <summary>
+    /// Attempts to add a match as a new entity. Returns true if successful, false if it already exists.
+    /// </summary>
+    private static async Task<bool> TryAddNewMatchAsync(TableClient tableClient, UpcomingMatch match)
     {
         try
         {
-            var response = await _upcomingMatchesTable.GetEntityAsync<UpcomingMatch>(partitionKey, rowKey);
+            await tableClient.AddEntityAsync(match);
+            return true;
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 409) // Conflict - entity exists
+        {
+            return false;
+        }
+    }
+
+    private static async Task<UpcomingMatch?> GetExistingMatchAsync(TableClient tableClient, string partitionKey, string rowKey)
+    {
+        try
+        {
+            var response = await tableClient.GetEntityAsync<UpcomingMatch>(partitionKey, rowKey);
             return response.Value;
         }
         catch (Azure.RequestFailedException ex) when (ex.Status == 404)
@@ -120,11 +146,11 @@ public class ProcessTicketUpdate
         }
     }
 
-    private async Task<bool> IsNotificationSentAsync(string matchId)
+    private static async Task<bool> IsNotificationSentAsync(TableClient tableClient, string matchId)
     {
         try
         {
-            await _sentNotificationsTable.GetEntityAsync<SentNotification>(matchId, "TicketAvailable");
+            await tableClient.GetEntityAsync<SentNotification>(matchId, "TicketAvailable");
             return true;
         }
         catch (Azure.RequestFailedException ex) when (ex.Status == 404)

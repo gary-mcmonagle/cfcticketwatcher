@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Azure.Data.Tables;
 using CfcTicketWatcher.Models;
 using Microsoft.Azure.Functions.Worker;
@@ -14,19 +13,28 @@ namespace CfcTicketWatcher.Functions.Functions;
 public class ProcessUpcomingMatches
 {
     private readonly ILogger<ProcessUpcomingMatches> _logger;
-    private readonly TableClient _sentNotificationsTable;
+    private readonly IConfiguration _configuration;
+    private TableClient? _sentNotificationsTable;
+    private readonly string _storageConnectionString;
 
     public ProcessUpcomingMatches(
         IConfiguration configuration,
         ILogger<ProcessUpcomingMatches> logger)
     {
         _logger = logger;
+        _configuration = configuration;
+        _storageConnectionString = configuration["AzureWebJobsStorage"] ?? "UseDevelopmentStorage=true";
+    }
 
-        var storageConnectionString = configuration["AzureWebJobsStorage"] ?? "UseDevelopmentStorage=true";
-        var tableServiceClient = new TableServiceClient(storageConnectionString);
-        
-        _sentNotificationsTable = tableServiceClient.GetTableClient("SentNotifications");
-        _sentNotificationsTable.CreateIfNotExists();
+    private async Task<TableClient> GetTableClientAsync()
+    {
+        if (_sentNotificationsTable == null)
+        {
+            var tableServiceClient = new TableServiceClient(_storageConnectionString);
+            _sentNotificationsTable = tableServiceClient.GetTableClient("SentNotifications");
+            await _sentNotificationsTable.CreateIfNotExistsAsync();
+        }
+        return _sentNotificationsTable;
     }
 
     /// <summary>
@@ -45,10 +53,11 @@ public class ProcessUpcomingMatches
 
         try
         {
-            // Double-check if notification was already sent (for idempotency)
-            var alreadySent = await IsNotificationSentAsync(message.MatchId);
+            // Try to record the notification first - this acts as a lock
+            // If it fails because the entity already exists, we skip (idempotent)
+            var notificationRecorded = await TryRecordNotificationAsync(message);
             
-            if (alreadySent)
+            if (!notificationRecorded)
             {
                 _logger.LogInformation(
                     "Notification already sent for match {MatchId}, skipping",
@@ -58,9 +67,6 @@ public class ProcessUpcomingMatches
 
             // Create email message
             var emailMessage = CreateEmailMessage(message);
-
-            // Record that we're sending this notification
-            await RecordNotificationSentAsync(message);
 
             _logger.LogInformation(
                 "Queuing email notification for match {MatchId}",
@@ -142,29 +148,34 @@ Hail Hail! 🍀
         };
     }
 
-    private async Task<bool> IsNotificationSentAsync(string matchId)
+    /// <summary>
+    /// Attempts to record a notification using AddEntity (not Upsert) to ensure idempotency.
+    /// If the entity already exists, this will return false indicating the notification was already recorded.
+    /// </summary>
+    private async Task<bool> TryRecordNotificationAsync(MatchNotificationMessage message)
     {
-        try
-        {
-            await _sentNotificationsTable.GetEntityAsync<SentNotification>(matchId, "TicketAvailable");
-            return true;
-        }
-        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
-        {
-            return false;
-        }
-    }
-
-    private async Task RecordNotificationSentAsync(MatchNotificationMessage message)
-    {
+        var tableClient = await GetTableClientAsync();
+        var toEmail = _configuration["NotificationEmailTo"];
+        
         var notification = new SentNotification
         {
             PartitionKey = message.MatchId,
             RowKey = "TicketAvailable",
             SentAt = DateTimeOffset.UtcNow,
-            MatchLabel = message.MatchLabel
+            MatchLabel = message.MatchLabel,
+            EmailTo = toEmail
         };
 
-        await _sentNotificationsTable.UpsertEntityAsync(notification);
+        try
+        {
+            // Use AddEntity which will fail if the entity already exists
+            // This prevents race conditions where multiple queue messages could process simultaneously
+            await tableClient.AddEntityAsync(notification);
+            return true;
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 409) // Conflict - entity already exists
+        {
+            return false;
+        }
     }
 }

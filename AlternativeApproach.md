@@ -96,7 +96,8 @@ Key changes from original proposal:
 
 ### Blob Storage
 - Container: `ticket-data`
-- Path: `responses/{yyyy}/{MM}/{dd}/{HH}-{mm}-{ss}.json`
+- Path: `responses/{DateTime:yyyyMMddHHmmss}.json`
+- Example: `responses/20260129153000.json`
 
 ### Table Storage
 - **UpcomingMatches Table**
@@ -107,7 +108,7 @@ Key changes from original proposal:
 - **SentNotifications Table**
   - PartitionKey: MatchID
   - RowKey: NotificationType (e.g., "TicketAvailable")
-  - Properties: SentAt, EmailTo
+  - Properties: SentAt, EmailTo, MatchLabel
 
 ### Queue Storage
 - **new-matches-queue**: For matches that need notification checking

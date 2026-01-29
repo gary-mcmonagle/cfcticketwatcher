@@ -1,4 +1,3 @@
-using System.Text;
 using CfcTicketWatcher.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
@@ -23,10 +22,12 @@ public class GetTicketInformation
     }
 
     /// <summary>
-    /// Timer-triggered function that fetches ticket data and outputs to blob storage
+    /// Timer-triggered function that fetches ticket data and outputs to blob storage.
+    /// Blob path format: ticket-data/responses/{DateTime:yyyyMMddHHmmss}.json
+    /// Example: ticket-data/responses/20260129153000.json
     /// </summary>
     [Function(nameof(GetTicketInformation))]
-    [BlobOutput("ticket-data/responses/{DateTime}.json", Connection = "AzureWebJobsStorage")]
+    [BlobOutput("ticket-data/responses/{DateTime:yyyyMMddHHmmss}.json", Connection = "AzureWebJobsStorage")]
     public async Task<string?> Run(
         [TimerTrigger("0 */15 * * * *")] TimerInfo timerInfo,
         FunctionContext context)
