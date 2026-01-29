@@ -1,0 +1,18 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "TicketApiUrl": "https://webapi.gc.celticfc.com/v1/pages/byfullpath?fullPath=tickets",
+    "AzureCommunicationServicesConnectionString": "<your-azure-communication-services-connection-string>",
+    "NotificationEmailFrom": "DoNotReply@<your-acs-domain>.azurecomm.net",
+    "NotificationEmailTo": "<your-email@example.com>"
+  },
+  "_comments": {
+    "AzureWebJobsStorage": "Connection string to Azure Storage account. Use 'UseDevelopmentStorage=true' for local Azurite emulator.",
+    "TicketApiUrl": "URL to fetch Celtic FC ticket information. Default value should work.",
+    "AzureCommunicationServicesConnectionString": "Connection string from Azure Communication Services resource. Found in Azure Portal > Your ACS resource > Keys.",
+    "NotificationEmailFrom": "The sender email address. Must be a verified domain in Azure Communication Services.",
+    "NotificationEmailTo": "The recipient email address where ticket notifications will be sent."
+  }
+}
