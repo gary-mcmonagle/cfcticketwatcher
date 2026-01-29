@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CfcTicketWatcher.Functions/CfcTicketWatcher.Functions.csproj" />
+    <Project Path="src/CfcTicketWatcher.Models/CfcTicketWatcher.Models.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CfcTicketWatcher.Tests/CfcTicketWatcher.Tests.csproj" />
+  </Folder>
+</Solution>
