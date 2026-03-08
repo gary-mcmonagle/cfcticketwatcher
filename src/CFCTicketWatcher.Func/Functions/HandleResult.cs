@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Azure.Communication.Email;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
@@ -6,11 +7,13 @@ using Microsoft.Extensions.Logging;
 
 namespace CFCTicketWatcher.Func.Functions;
 
-public class HandleResult(
+public partial class HandleResult(
     ILogger<HandleResult> logger, 
     EmailClient emailClient,
     IConfiguration configuration)
 {
+    [GeneratedRegex(@"^St\.?\s*Mirren$|^Saint\s*Mirren$", RegexOptions.IgnoreCase)]
+    private static partial Regex StMirrenRegex();
     [Function(nameof(HandleResult))]
     public async Task Run([QueueTrigger("fixture-results")] string message)
     {
@@ -41,10 +44,12 @@ public class HandleResult(
         }
 
         var emailContent = BuildEmailContent(resultMessage);
+
+        var isUrgent = resultMessage.Fixtures.Any(f => StMirrenRegex().IsMatch(f.Opponent));
         
         var emailMessage = new EmailMessage(
             senderAddress: senderEmail,
-            content: new EmailContent("Celtic FC Upcoming Fixtures")
+            content: new EmailContent($"{(isUrgent ? "[URGENT] " : "")}Celtic FC Upcoming Fixtures")
             {
                 Html = emailContent
             },

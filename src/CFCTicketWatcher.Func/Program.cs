@@ -21,16 +21,16 @@ builder.Services.AddSingleton(sp =>
     return new EmailClient(connectionString);
 });
 
-// Register HTTP clients for Core services
+// Register HTTP clients for Core services with retry policy
 builder.Services.AddHttpClient<IPageContentService, PageContentService>(client =>
 {
     client.BaseAddress = new Uri("https://webapi.gc.celticfc.com/");
-});
+}).AddRetryPolicy();
 
 builder.Services.AddHttpClient<IFixtureService, FixtureService>(client =>
 {
     client.BaseAddress = new Uri("https://webapi.gc.celticfc.com/");
-});
+}).AddRetryPolicy();
 
 builder.Services.AddTransient<IUpcomingFixtureService, UpcomingFixtureService>();
 

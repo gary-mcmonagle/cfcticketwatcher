@@ -9,8 +9,7 @@ public class GetFixtures(
     IUpcomingFixtureService upcomingFixtureService)
 {
     [Function(nameof(GetFixtures))]
-    [QueueOutput("fixture-results")]
-    public async Task<FixtureResultMessage?> Run([QueueTrigger("fixture-requests")] string requestId)
+    public async Task<GetFixturesOutput> Run([QueueTrigger("fixture-requests")] string requestId)
     {
         logger.LogInformation("Processing fixture request: {RequestId}", requestId);
 
@@ -21,19 +20,42 @@ public class GetFixtures(
             logger.LogInformation("Found {Count} upcoming fixtures for request {RequestId}", 
                 fixtures.Count, requestId);
 
-            return new FixtureResultMessage
+            return new GetFixturesOutput
             {
-                RequestId = requestId,
-                Fixtures = fixtures,
-                ProcessedAt = DateTime.UtcNow
+                Result = new FixtureResultMessage
+                {
+                    RequestId = requestId,
+                    Fixtures = fixtures,
+                    ProcessedAt = DateTime.UtcNow
+                }
             };
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error processing fixture request {RequestId}", requestId);
-            throw;
+            
+            return new GetFixturesOutput
+            {
+                Failure = new FailureMessage
+                {
+                    RequestId = requestId,
+                    FunctionName = nameof(GetFixtures),
+                    ErrorMessage = ex.Message,
+                    StackTrace = ex.StackTrace,
+                    FailedAt = DateTime.UtcNow
+                }
+            };
         }
     }
+}
+
+public class GetFixturesOutput
+{
+    [QueueOutput("fixture-results")]
+    public FixtureResultMessage? Result { get; set; }
+    
+    [QueueOutput("fixture-failures")]
+    public FailureMessage? Failure { get; set; }
 }
 
 public class FixtureResultMessage
