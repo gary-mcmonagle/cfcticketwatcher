@@ -3,6 +3,11 @@
 ##
 ## Get latest from `dotnet new gitignore`
 
+# Azurite local storage emulator
+__azurite_db_*__.json
+__blobstorage__/
+__queuestorage__/
+
 # dotenv files
 .env
 
