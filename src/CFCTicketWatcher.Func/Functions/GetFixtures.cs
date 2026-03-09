@@ -1,4 +1,5 @@
 using CFCTicketWatcher.Core;
+using CFCTicketWatcher.Func.TableStorage;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
@@ -6,7 +7,8 @@ namespace CFCTicketWatcher.Func.Functions;
 
 public class GetFixtures(
     ILogger<GetFixtures> logger, 
-    IUpcomingFixtureService upcomingFixtureService)
+    IUpcomingFixtureService upcomingFixtureService,
+    IFixtureTableStorageService fixtureTableStorageService)
 {
     [Function(nameof(GetFixtures))]
     public async Task<GetFixturesOutput> Run([QueueTrigger("fixture-requests")] string requestId)
@@ -20,12 +22,27 @@ public class GetFixtures(
             logger.LogInformation("Found {Count} upcoming fixtures for request {RequestId}", 
                 fixtures.Count, requestId);
 
+            var storedFixtures = await fixtureTableStorageService.GetStoredFixturesAsync();
+            var storedRowKeys = storedFixtures
+                .Select(FixtureTableStorageService.BuildRowKey)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var newFixtures = fixtures
+                .Where(f => !storedRowKeys.Contains(FixtureTableStorageService.BuildRowKey(f)))
+                .ToList();
+
+            logger.LogInformation("Detected {NewCount} new fixture(s) for request {RequestId}",
+                newFixtures.Count, requestId);
+
+            await fixtureTableStorageService.UpdateFixturesAsync(fixtures);
+
             return new GetFixturesOutput
             {
                 Result = new FixtureResultMessage
                 {
                     RequestId = requestId,
                     Fixtures = fixtures,
+                    NewFixtures = newFixtures,
                     ProcessedAt = DateTime.UtcNow
                 }
             };
@@ -62,5 +79,6 @@ public class FixtureResultMessage
 {
     public string RequestId { get; init; } = string.Empty;
     public List<Core.Result.FixtureResult> Fixtures { get; init; } = [];
+    public List<Core.Result.FixtureResult> NewFixtures { get; init; } = [];
     public DateTime ProcessedAt { get; init; }
 }
