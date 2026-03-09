@@ -1,5 +1,7 @@
 using Azure.Communication.Email;
+using Azure.Data.Tables;
 using CFCTicketWatcher.Core;
+using CFCTicketWatcher.Func.TableStorage;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +22,19 @@ builder.Services.AddSingleton(sp =>
     }
     return new EmailClient(connectionString);
 });
+
+// Register Azure Table Storage client for fixture tracking
+builder.Services.AddSingleton(sp =>
+{
+    var connectionString = builder.Configuration["AzureWebJobsStorage"];
+    if (string.IsNullOrEmpty(connectionString))
+    {
+        return new TableServiceClient("UseDevelopmentStorage=true");
+    }
+    return new TableServiceClient(connectionString);
+});
+
+builder.Services.AddSingleton<IFixtureTableStorageService, FixtureTableStorageService>();
 
 // Register HTTP clients for Core services with retry policy
 builder.Services.AddHttpClient<IPageContentService, PageContentService>(client =>
